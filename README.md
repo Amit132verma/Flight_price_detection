@@ -96,4 +96,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-Would you like me to generate a `requirements.txt` file based on your notebook too?
+
