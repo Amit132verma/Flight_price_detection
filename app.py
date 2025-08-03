@@ -2,12 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import seaborn as sns
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, PowerTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import warnings
@@ -60,62 +58,97 @@ if 'model_trained' not in st.session_state:
 def load_and_preprocess_data():
     """Load and preprocess the flight data"""
     try:
-        # For demo purposes, create sample data
-        # In production, replace this with: dataset = pd.read_csv('flight_data.csv')
-        
-        # Sample data creation (replace with actual data loading)
+        # Create sample data for demonstration
         np.random.seed(42)
         n_samples = 1000
         
         airlines = ['IndiGo', 'Air India', 'Jet Airways', 'SpiceJet', 'GoAir', 'Vistara']
         sources = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad']
         destinations = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad', 'Pune', 'Ahmedabad']
+        additional_info_options = ['No info', 'In-flight meal not included', 'Business class', 'Extra legroom']
+        
+        # Generate base prices with some logic
+        base_prices = []
+        airlines_data = []
+        sources_data = []
+        destinations_data = []
+        stops_data = []
+        duration_data = []
+        additional_info_data = []
+        dep_hr_data = []
+        arrival_hr_data = []
+        
+        for i in range(n_samples):
+            airline = np.random.choice(airlines)
+            source = np.random.choice(sources)
+            destination = np.random.choice([d for d in destinations if d != source])
+            stops = np.random.choice([0, 1, 2, 3], p=[0.4, 0.35, 0.2, 0.05])
+            
+            # Base price calculation with some logic
+            base_price = 3000
+            
+            # Airline premium
+            if airline in ['Vistara', 'Air India']:
+                base_price += 2000
+            elif airline in ['IndiGo', 'SpiceJet']:
+                base_price += 500
+            
+            # Route premium
+            if source in ['Mumbai', 'Delhi'] or destination in ['Mumbai', 'Delhi']:
+                base_price += 1500
+            
+            # Stops penalty
+            base_price += stops * 800
+            
+            # Duration
+            duration = 1.5 + stops * 0.5 + np.random.normal(0, 0.5)
+            duration = max(1.0, duration)
+            base_price += duration * 500
+            
+            # Time of day effect
+            dep_hr = np.random.randint(5, 23)
+            arrival_hr = int(dep_hr + duration) % 24
+            
+            if dep_hr in [6, 7, 8, 18, 19, 20]:  # Peak hours
+                base_price += 1000
+            
+            # Additional info
+            additional_info = np.random.choice(additional_info_options)
+            if additional_info == 'Business class':
+                base_price *= 2.5
+            elif additional_info == 'Extra legroom':
+                base_price += 1500
+            
+            # Add some randomness
+            final_price = base_price + np.random.normal(0, 500)
+            final_price = max(2000, final_price)  # Minimum price
+            
+            base_prices.append(final_price)
+            airlines_data.append(airline)
+            sources_data.append(source)
+            destinations_data.append(destination)
+            stops_data.append(stops)
+            duration_data.append(duration)
+            additional_info_data.append(additional_info)
+            dep_hr_data.append(dep_hr)
+            arrival_hr_data.append(arrival_hr)
         
         dataset = pd.DataFrame({
-            'Airline': np.random.choice(airlines, n_samples),
-            'Source': np.random.choice(sources, n_samples),
-            'Destination': np.random.choice(destinations, n_samples),
-            'Date_of_Journey': pd.date_range('2024-01-01', periods=n_samples, freq='D'),
-            'Dep_Time': [f"{np.random.randint(0,24):02d}:{np.random.randint(0,60):02d}" for _ in range(n_samples)],
-            'Arrival_Time': [f"{np.random.randint(0,24):02d}:{np.random.randint(0,60):02d}" for _ in range(n_samples)],
-            'Duration': [f"{np.random.randint(1,15)}h {np.random.randint(0,60)}m" for _ in range(n_samples)],
-            'Total_Stops': np.random.choice(['non-stop', '1 stop', '2 stops', '3 stops'], n_samples),
-            'Additional_Info': np.random.choice(['No info', 'In-flight meal not included', 'Business class'], n_samples),
-            'Price': np.random.normal(8000, 3000, n_samples)
+            'Airline': airlines_data,
+            'Source': sources_data,
+            'Destination': destinations_data,
+            'day': np.random.randint(1, 32, n_samples),
+            'month': np.random.randint(1, 13, n_samples),
+            'year': np.random.choice([2024, 2025], n_samples),
+            'Total_Stops': stops_data,
+            'Dep_hr': dep_hr_data,
+            'Dep_Minz': np.random.randint(0, 60, n_samples),
+            'Arrival_hr': arrival_hr_data,
+            'Arrival_minz': np.random.randint(0, 60, n_samples),
+            'Total_Duration_hrs': duration_data,
+            'Additional_Info': additional_info_data,
+            'Price': base_prices
         })
-        
-        # Ensure positive prices
-        dataset['Price'] = np.abs(dataset['Price'])
-        
-        # Preprocessing steps
-        dataset['day'] = pd.to_datetime(dataset['Date_of_Journey']).dt.day
-        dataset['month'] = pd.to_datetime(dataset['Date_of_Journey']).dt.month
-        dataset['year'] = pd.to_datetime(dataset['Date_of_Journey']).dt.year
-        dataset.drop(columns=['Date_of_Journey'], inplace=True)
-        
-        # Departure time preprocessing
-        dataset['Dep_hr'] = dataset['Dep_Time'].str.split(':', expand=True)[0].astype(float)
-        dataset['Dep_Minz'] = dataset['Dep_Time'].str.split(':', expand=True)[1].astype(float)
-        dataset.drop(columns=['Dep_Time'], inplace=True)
-        
-        # Arrival time preprocessing
-        val_1 = dataset["Arrival_Time"].str.split(":", expand=True)
-        dataset['Arrival_hr'] = val_1[0].astype(float)
-        dataset['Arrival_minz'] = val_1[1].astype(float)
-        dataset.drop(columns=['Arrival_Time'], inplace=True)
-        
-        # Duration preprocessing
-        val_3 = dataset['Duration'].str.split(' ', expand=True)
-        val_3[0] = val_3[0].str.replace('5m', '5h')
-        hours = val_3[0].str.split('h', expand=True)[0].astype(float)
-        val_3[1] = val_3[1].fillna('0m')
-        minz = val_3[1].str.split('m', expand=True)[0].astype(float) / 60
-        dataset['Total_Duration_hrs'] = hours + minz
-        dataset.drop(columns=['Duration'], inplace=True)
-        
-        # Total stops preprocessing
-        dataset['Total_Stops'] = dataset['Total_Stops'].str.replace('non-stop', '0')
-        dataset['Total_Stops'] = dataset['Total_Stops'].str.split(" ", expand=True)[0].astype(float)
         
         # Remove outliers
         q1 = dataset['Price'].quantile(0.25)
@@ -144,12 +177,11 @@ def train_model(dataset):
         
         preprocessor = ColumnTransformer(
             transformers=[
-                ("num", PowerTransformer(), numerical_features),
+                ("num", StandardScaler(), numerical_features),
                 ("cat", OneHotEncoder(handle_unknown='ignore'), categorical_features)
             ]
         )
         
-        # Use RandomForest as the default model
         model = RandomForestRegressor(n_estimators=100, max_depth=10, min_samples_split=5, random_state=42)
         
         pipeline = Pipeline(steps=[
@@ -310,7 +342,8 @@ elif page == "🔮 Price Prediction":
         with col1:
             airline = st.selectbox("Airline", dataset['Airline'].unique())
             source = st.selectbox("Source City", dataset['Source'].unique())
-            destination = st.selectbox("Destination City", dataset['Destination'].unique())
+            destination = st.selectbox("Destination City", 
+                                     [d for d in dataset['Destination'].unique() if d != source])
             additional_info = st.selectbox("Additional Info", dataset['Additional_Info'].unique())
         
         with col2:
@@ -374,6 +407,24 @@ elif page == "🔮 Price Prediction":
                 
                 st.markdown(f"**Price Category:** <span style='color: {color}'>{category}</span>", unsafe_allow_html=True)
                 
+                # Show price breakdown
+                st.markdown("### Price Factors")
+                factors = []
+                if total_stops > 0:
+                    factors.append(f"• {total_stops} stop(s): +₹{total_stops * 800}")
+                if airline in ['Vistara', 'Air India']:
+                    factors.append(f"• Premium airline ({airline}): +₹2000")
+                if additional_info == 'Business class':
+                    factors.append("• Business class: +150% premium")
+                if dep_hr in [6, 7, 8, 18, 19, 20]:
+                    factors.append("• Peak hour departure: +₹1000")
+                
+                if factors:
+                    for factor in factors:
+                        st.write(factor)
+                else:
+                    st.write("• Base pricing applied")
+                
             except Exception as e:
                 st.error(f"Error making prediction: {str(e)}")
 
@@ -414,33 +465,66 @@ elif page == "📈 Model Performance":
         else:
             st.warning("⚠️ Moderate model performance. Consider feature engineering or trying different algorithms.")
         
-        # Feature importance (if using tree-based model)
+        # Feature importance visualization
         try:
-            # Re-train to get feature importance
-            pipeline_temp, _, _, _, _ = train_model(dataset)
-            if hasattr(pipeline_temp.named_steps['model'], 'feature_importances_'):
-                feature_names = (pipeline_temp.named_steps['preprocessor']
-                               .named_transformers_['num'].get_feature_names_out().tolist() +
-                               pipeline_temp.named_steps['preprocessor']
-                               .named_transformers_['cat'].get_feature_names_out().tolist())
-                
-                importances = pipeline_temp.named_steps['model'].feature_importances_
-                feature_importance_df = pd.DataFrame({
-                    'feature': feature_names,
-                    'importance': importances
-                }).sort_values('importance', ascending=False).head(10)
-                
-                st.markdown("### Top 10 Most Important Features")
-                fig = px.bar(feature_importance_df, x='importance', y='feature', 
-                           orientation='h', title='Feature Importance')
-                st.plotly_chart(fig, use_container_width=True)
-        except:
-            st.info("Feature importance visualization not available for this model type.")
+            # Get feature names after preprocessing
+            pipeline_temp = st.session_state.pipeline
+            
+            # Get feature names
+            num_features = pipeline_temp.named_steps['preprocessor'].named_transformers_['num'].get_feature_names_out()
+            cat_features = pipeline_temp.named_steps['preprocessor'].named_transformers_['cat'].get_feature_names_out()
+            all_features = list(num_features) + list(cat_features)
+            
+            importances = pipeline_temp.named_steps['model'].feature_importances_
+            
+            # Create feature importance dataframe
+            feature_importance_df = pd.DataFrame({
+                'feature': all_features,
+                'importance': importances
+            }).sort_values('importance', ascending=False).head(15)
+            
+            st.markdown("### Top 15 Most Important Features")
+            fig = px.bar(feature_importance_df, x='importance', y='feature', 
+                       orientation='h', title='Feature Importance')
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.info("Feature importance visualization not available.")
+        
+        # Prediction vs Actual scatter plot
+        st.markdown("### Model Predictions vs Actual Prices")
+        
+        # Create scatter plot for a subset of predictions
+        try:
+            sample_size = min(200, len(y_test))
+            sample_indices = np.random.choice(len(y_test), sample_size, replace=False)
+            
+            scatter_df = pd.DataFrame({
+                'Actual': y_test.iloc[sample_indices],
+                'Predicted': y_test_pred[sample_indices]
+            })
+            
+            fig_scatter = px.scatter(scatter_df, x='Actual', y='Predicted', 
+                                   title=f'Actual vs Predicted Prices (Sample of {sample_size} flights)')
+            
+            # Add perfect prediction line
+            min_val = min(scatter_df['Actual'].min(), scatter_df['Predicted'].min())
+            max_val = max(scatter_df['Actual'].max(), scatter_df['Predicted'].max())
+            fig_scatter.add_scatter(x=[min_val, max_val], y=[min_val, max_val], 
+                                  mode='lines', name='Perfect Prediction', 
+                                  line=dict(dash='dash', color='red'))
+            
+            st.plotly_chart(fig_scatter, use_container_width=True)
+            
+        except Exception as e:
+            st.info("Prediction visualization not available.")
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
 <p>Flight Price Predictor • Built with Streamlit 🚀</p>
+<p>Upload your flight_data.csv file to use real data instead of sample data</p>
 </div>
 """, unsafe_allow_html=True)
